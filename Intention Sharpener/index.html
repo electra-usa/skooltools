@@ -398,12 +398,10 @@
           <button type="button" onclick="buildSentence()" class="btn btn-ghost" style="margin-bottom:10px;">Build my sentence from answers 01&ndash;04</button>
           <p class="field-help" id="build-note" style="margin:0 0 10px;">Your words are placed as typed, with only connecting words added. Edit the sentence below however you like.</p>
           <textarea id="input-synthesized" rows="2" placeholder="e.g., I will generate 5 new digital product sales via Stripe for my coaching business by the end of this month."></textarea>
-          <button type="button" class="btn btn-ghost ai-only" style="margin-top:10px;" onclick="checkSpelling(['input-synthesized'],'spell-note-2',this)">Check spelling (AI)</button>
-          <p class="field-help ai-only" style="margin:8px 0 0;">Sends this sentence to a Google AI service that fixes misspelled words only. It never rewrites your words, and you can undo.</p>
-          <p class="field-help spell-note ai-only" id="spell-note-2" style="margin:6px 0 0;"></p>
+          <p class="field-help ai-only" style="margin:8px 0 0;">Pressing &ldquo;Build my sentence&rdquo; also checks spelling. Your sentence is sent to a Google AI service that fixes misspelled words only. It never rewrites your words, and you can undo.</p>
         </div>
 
-        <button onclick="nextStep(3)" class="btn btn-primary">File the target &#9656;</button>
+        <button onclick="fileTarget(this)" class="btn btn-primary">File the target &#9656;</button>
       </div>
 
       <!-- Step 3 -->
@@ -448,11 +446,9 @@
           <input type="text" id="input-microstep" placeholder="e.g., Draft a quick email, put my running shoes by the door...">
         </div>
 
-        <button type="button" class="btn btn-ghost ai-only" onclick="checkSpelling(ALL_TEXT_IDS,'spell-note-4',this)">Check spelling on all my answers (AI)</button>
-        <p class="field-help ai-only" style="margin:8px 0 0;">Sends your answers (not the first name) to a Google AI service that fixes misspelled words only. It never rewrites your words, and you can undo.</p>
-        <p class="field-help spell-note ai-only" id="spell-note-4" style="margin:6px 0 0;"></p>
+        <p class="field-help ai-only" style="margin:18px 0 0;">Pressing &ldquo;File the case&rdquo; also checks spelling on your answers (not your first name) using a Google AI service that fixes misspelled words only. It never rewrites your words, and you can undo on the next screen.</p>
 
-        <button onclick="generateCard()" class="btn btn-primary">File the case &#9656;</button>
+        <button onclick="generateCard(false, this)" class="btn btn-primary" style="margin-top:14px;">File the case &#9656;</button>
       </div>
 
       <!-- Step 5 -->
@@ -492,6 +488,8 @@
           <p class="report-label">IMMEDIATE ACTION REQUIRED</p>
           <p id="out-action"></p>
         </div>
+
+        <p class="field-help spell-note ai-only" id="spell-note-5" style="margin:14px 0 0;"></p>
 
         <div class="btn-row">
           <button onclick="printCard(false)" class="btn btn-ghost">Save PDF &mdash; full color</button>
@@ -543,7 +541,7 @@
     window.scrollTo(0, 0);
   }
 
-  function generateCard() {
+  function renderCard() {
     document.getElementById('out-target').innerText = document.getElementById('input-synthesized').value || 'Not specified.';
     document.getElementById('out-internal').innerText = document.getElementById('input-internal').value || 'Internal driver not specified.';
     document.getElementById('out-name').innerText = (document.getElementById('input-name').value || 'SOMEONE').toUpperCase();
@@ -578,23 +576,62 @@
   function clean(id) {
     return document.getElementById(id).value.trim().replace(/[\s.,;:!]+$/, '');
   }
-  function buildSentence() {
+  function buildSentenceCore() {
     metricNudge(true);
     const scope = clean('input-scope'), metric = clean('input-metric'),
           proof = clean('input-proof'), timeline = clean('input-timeline');
     const note = document.getElementById('build-note');
     if (!scope && !metric && !proof && !timeline) {
       note.innerText = 'Fill in at least one of answers 01\u201304 first, then try again.';
-      return;
+      return false;
     }
     const box = document.getElementById('input-synthesized');
-    if (box.value.trim() && !confirm('Replace the sentence below with a new one built from your answers?')) return;
+    if (box.value.trim() && !confirm('Replace the sentence below with a new one built from your answers?')) return false;
     let out = 'I will achieve ' + (metric ? lcStart(metric) : 'my target');
     if (scope)    out += ' in ' + lcStart(scope);
     if (proof)    out += ', proven by ' + lcStart(proof);
     if (timeline) out += ', ' + lcStart(timeline);
     box.value = out + '.';
     note.innerText = 'Built from your answers. Your words are kept as typed (only trailing punctuation is trimmed). Edit anything that reads awkwardly.';
+    return true;
+  }
+  async function buildSentence() {
+    if (!buildSentenceCore()) return;
+    if (!PROXY_URL) return;
+    const base = document.getElementById('build-note').textContent;
+    showNote('build-note', base + ' Checking spelling\u2026');
+    const r = await spellFix(['input-synthesized']);
+    const extra = noteFor(r);
+    showNote('build-note', base + (extra ? ' ' + extra : ''), r.undo);
+  }
+
+  // File the target: if the sentence box is still empty, build it from answers 01-04 first
+  // (with the automatic spelling check when enabled), then move on. Existing text is never touched.
+  async function fileTarget(btn) {
+    if (!document.getElementById('input-synthesized').value.trim()) {
+      const label = btn.innerHTML;
+      btn.disabled = true;
+      btn.textContent = 'Building your sentence\u2026';
+      await buildSentence();
+      btn.disabled = false;
+      btn.innerHTML = label;
+    }
+    nextStep(3);
+  }
+
+  async function generateCard(skipCheck, btn) {
+    // safety net: a member who skipped the sentence step still gets a Target on the card
+    if (!document.getElementById('input-synthesized').value.trim()) buildSentenceCore();
+    if (PROXY_URL && !skipCheck) {
+      const label = btn ? btn.innerHTML : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Checking spelling\u2026'; }
+      const r = await spellFix(ALL_TEXT_IDS);
+      if (btn) { btn.disabled = false; btn.innerHTML = label; }
+      renderCard();
+      showNote('spell-note-5', noteFor(r), r.undo, () => renderCard());
+    } else {
+      renderCard();
+    }
   }
 
   // Low-ink option: adds a class that the print stylesheet uses to drop all fills.
@@ -605,9 +642,9 @@
   window.addEventListener('afterprint', () => document.body.classList.remove('low-ink'));
 
   // ================= AI SPELL CHECK (optional) =================
-  // Leave PROXY_URL empty and the spell-check buttons stay hidden; the file works fully offline.
-  // To turn it on, deploy the spell-check proxy and paste its https:// URL between the quotes.
-  const PROXY_URL = '';
+  // Spell check runs automatically on Build my sentence and File the case, through a small Cloud Run service.
+  // Leave PROXY_URL empty to switch it off; the file then works fully offline.
+  const PROXY_URL = 'https://intention-spellcheck-939333616048.us-central1.run.app';
   const ALL_TEXT_IDS = ['input-goal','input-scope','input-metric','input-proof','input-timeline',
     'input-synthesized','input-internal','input-external-how','input-cost','input-microstep'];
   const MAX_CHARS = 400;   // must match the proxy
@@ -666,31 +703,35 @@
     });
     return { ok: true, text: parts.join(''), changes };
   }
-  function showNote(noteId, msg, undo) {
+  function showNote(noteId, msg, undo, after) {
     const el = document.getElementById(noteId);
     el.textContent = msg;
     if (undo && undo.length) {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'undo-link'; b.textContent = 'Undo';
-      b.onclick = () => { undo.forEach(u => { document.getElementById(u.id).value = u.text; }); showNote(noteId, 'Restored your original text.'); };
+      b.onclick = () => {
+        undo.forEach(u => { document.getElementById(u.id).value = u.text; });
+        if (after) after();
+        showNote(noteId, 'Restored your original text.');
+      };
       el.appendChild(document.createTextNode(' '));
       el.appendChild(b);
     }
   }
-  async function checkSpelling(ids, noteId, btn) {
+  // Runs the automatic check on the given fields. Never throws, never blocks: on any problem
+  // the member's text is simply left as typed.
+  async function spellFix(ids) {
     const all = ids.map(id => ({ id, text: document.getElementById(id).value })).filter(x => x.text.trim());
     const items = all.filter(x => x.text.length <= MAX_CHARS);
     const skipped = all.length - items.length;
-    if (!items.length) { showNote(noteId, all.length ? 'That text is too long to check (max ' + MAX_CHARS + ' characters per answer).' : 'Nothing to check yet.'); return; }
-    btn.disabled = true;
-    showNote(noteId, 'Checking spelling...');
+    if (!items.length) return { status: 'none', skipped, changes: [], undo: [] };
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 20000);
+      const timer = setTimeout(() => ctrl.abort(), 10000);
       const r = await fetch(PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: items.map(x => x.text) }), signal: ctrl.signal });
       clearTimeout(timer);
-      if (r.status === 429) { showNote(noteId, 'Spell check is busy right now. Your text was not changed. Try again later.'); return; }
+      if (r.status === 429) return { status: 'rate', skipped, changes: [], undo: [] };
       if (!r.ok) throw new Error('status ' + r.status);
       const data = await r.json();
       if (!Array.isArray(data.texts) || data.texts.length !== items.length) throw new Error('bad response');
@@ -703,14 +744,21 @@
           changes.push.apply(changes, res.changes);
         }
       });
-      let msg = changes.length
-        ? 'Fixed ' + changes.length + (changes.length === 1 ? ' word: ' : ' words: ') + changes.slice(0, 8).map(c => c.from + ' \u2192 ' + c.to).join(', ') + (changes.length > 8 ? ', ...' : '') + '.'
-        : 'No spelling fixes needed. Your text was not changed.';
-      if (skipped) msg += ' (' + skipped + ' long answer' + (skipped > 1 ? 's were' : ' was') + ' skipped.)';
-      showNote(noteId, msg, undo);
+      return { status: 'ok', skipped, changes, undo };
     } catch (e) {
-      showNote(noteId, 'Spell check is not available right now. Your text was not changed.');
-    } finally { btn.disabled = false; }
+      return { status: 'error', skipped, changes: [], undo: [] };
+    }
+  }
+  function noteFor(r) {
+    let msg = '';
+    if (r.status === 'rate') msg = 'Spell check is busy right now, so your text was used as typed.';
+    else if (r.status === 'error') msg = 'Spell check was not available, so your text was used as typed.';
+    else if (r.status === 'ok' && r.changes.length)
+      msg = 'Spelling fixed (' + r.changes.length + (r.changes.length === 1 ? ' word' : ' words') + '): ' +
+            r.changes.slice(0, 8).map(c => c.from + ' \u2192 ' + c.to).join(', ') + (r.changes.length > 8 ? ', ...' : '') + '.';
+    else if (r.status === 'ok') msg = 'Spelling checked. No fixes needed.';
+    if (r.skipped) msg += ' (' + r.skipped + ' long answer' + (r.skipped > 1 ? 's were' : ' was') + ' not checked.)';
+    return msg;
   }
   if (PROXY_URL) document.querySelectorAll('.ai-only').forEach(el => el.classList.remove('ai-only'));
 
